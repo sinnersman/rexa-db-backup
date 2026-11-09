@@ -33,21 +33,20 @@ jobs:
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Rilis v$NEXT (dari $CUR)"
 
-      - name: Commit bump versi
+      - name: Commit bump versi + tag + push atomik
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add VERSION rexa-db-backup.sh
           git commit -m "chore: release v${{ steps.ver.outputs.version }} [skip ci]"
-          git push
+          git tag "v${{ steps.ver.outputs.version }}"
+          # Satu push untuk branch + tag (cegah 'missing necessary objects').
+          git push origin main "v${{ steps.ver.outputs.version }}"
 
-      - name: Buat tag + GitHub Release
+      - name: Buat GitHub Release
         run: |
-          V="${{ steps.ver.outputs.version }}"
-          git tag "v$V"
-          git push origin "v$V"
-          gh release create "v$V" rexa-db-backup.sh \
-            --title "v$V" \
+          gh release create "v${{ steps.ver.outputs.version }}" rexa-db-backup.sh \
+            --title "v${{ steps.ver.outputs.version }}" \
             --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
