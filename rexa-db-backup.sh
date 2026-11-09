@@ -216,13 +216,13 @@ test_socket() {
     echo "=== MySQL socket: $SOCKET_PATH db=$MY_DB user=$MY_USER ==="
     [ -S "$SOCKET_PATH" ] || { echo "[-] socket tidak ada: $SOCKET_PATH (pastikan mysql jalan & path benar)"; return 1; }
     PASSARG=""; [ -n "$MY_PASS" ] && PASSARG="-p$MY_PASS"
-    if mysqladmin --socket="$SOCKET_PATH" -u"$MY_USER" "$PASSARG" ping 2>&1 | grep -qi alive \
-      || mariadb-admin --socket="$SOCKET_PATH" -u"$MY_USER" "$PASSARG" ping 2>&1 | grep -qi alive; then
+    if mysqladmin --socket="$SOCKET_PATH" -u"$MY_USER" ${PASSARG:+"$PASSARG"} ping 2>&1 | grep -qi alive \
+      || mariadb-admin --socket="$SOCKET_PATH" -u"$MY_USER" ${PASSARG:+"$PASSARG"} ping 2>&1 | grep -qi alive; then
       echo "[+] mysql ping OK (alive)"
     else echo "[-] mysql ping GAGAL (cek user/password)"; return 1; fi
-    { mysql --socket="$SOCKET_PATH" -u"$MY_USER" "$PASSARG" -e \
+    { mysql --socket="$SOCKET_PATH" -u"$MY_USER" ${PASSARG:+"$PASSARG"} -e \
       "SELECT table_schema AS db, ROUND(SUM(data_length+index_length)/1024/1024,2) AS MB FROM information_schema.tables GROUP BY table_schema ORDER BY SUM(data_length+index_length);" 2>/dev/null \
-    || mariadb --socket="$SOCKET_PATH" -u"$MY_USER" "$PASSARG" -e \
+    || mariadb --socket="$SOCKET_PATH" -u"$MY_USER" ${PASSARG:+"$PASSARG"} -e \
       "SELECT table_schema AS db, ROUND(SUM(data_length+index_length)/1024/1024,2) AS MB FROM information_schema.tables GROUP BY table_schema ORDER BY SUM(data_length+index_length);" 2>&1; } | head -n 30
   fi
 }
@@ -256,7 +256,7 @@ do_backup_socket_mysql() {
   if [ "$MY_DB" = "all" ]; then
     out="$BACKUP_DIR/mysql_all_$ts.sql.gz"
     echo "[$(date '+%F %T')] MySQL[socket] backup --all-databases -> $out (via $DUMP)" | tee -a "$LOG_FILE"
-    if timeout 600 "$DUMP" --socket="$SOCKET_PATH" -u"$MY_USER" "$PASSARG" \
+    if timeout 600 "$DUMP" --socket="$SOCKET_PATH" -u"$MY_USER" ${PASSARG:+"$PASSARG"} \
         --all-databases --single-transaction --quick --skip-lock-tables 2>>"$LOG_FILE" | gzip -1 > "$out" \
         && verify_out "$out"; then
       echo "[+] MySQL OK: $(du -h "$out" | cut -f1) $out" | tee -a "$LOG_FILE"
@@ -264,7 +264,7 @@ do_backup_socket_mysql() {
   else
     out="$BACKUP_DIR/mysql_${MY_DB}_$ts.sql.gz"
     echo "[$(date '+%F %T')] MySQL[socket] backup $MY_DB -> $out (via $DUMP)" | tee -a "$LOG_FILE"
-    if timeout 600 "$DUMP" --socket="$SOCKET_PATH" -u"$MY_USER" "$PASSARG" \
+    if timeout 600 "$DUMP" --socket="$SOCKET_PATH" -u"$MY_USER" ${PASSARG:+"$PASSARG"} \
         "$MY_DB" --single-transaction --quick --skip-lock-tables 2>>"$LOG_FILE" | gzip -1 > "$out" \
         && verify_out "$out"; then
       echo "[+] MySQL OK: $(du -h "$out" | cut -f1) $out" | tee -a "$LOG_FILE"
@@ -312,11 +312,11 @@ test_mysql() {
   if [ "${MODE:-docker}" = "host" ]; then
     echo "=== MySQL host langsung: $MY_HOST:$MY_PORT db=$MY_DB user=$MY_USER ==="
     echo "[*] ping (timeout $TIMEOUT_S dtk)..."
-    if ct_mysqladmin_ping "" -u"$MY_USER" "$PASSARG" -h"$MY_HOST" -P"$MY_PORT" --connect-timeout=3 2>&1 | grep -qi alive; then
+    if ct_mysqladmin_ping "" -u"$MY_USER" ${PASSARG:+"$PASSARG"} -h"$MY_HOST" -P"$MY_PORT" --connect-timeout=3 2>&1 | grep -qi alive; then
       echo "[+] mysql ping OK (alive)"
-    else echo "[-] mysql ping GAGAL:"; ct_mysqladmin_ping "" -u"$MY_USER" "$PASSARG" -h"$MY_HOST" -P"$MY_PORT" --connect-timeout=3 2>&1 | head -n 5; return 1; fi
+    else echo "[-] mysql ping GAGAL:"; ct_mysqladmin_ping "" -u"$MY_USER" ${PASSARG:+"$PASSARG"} -h"$MY_HOST" -P"$MY_PORT" --connect-timeout=3 2>&1 | head -n 5; return 1; fi
     echo "[*] Ukuran tiap DB (paling kecil = paling cepet)..."
-    ct_mysql_exec "" -u"$MY_USER" "$PASSARG" -h"$MY_HOST" -P"$MY_PORT" --connect-timeout=3 -e \
+    ct_mysql_exec "" -u"$MY_USER" ${PASSARG:+"$PASSARG"} -h"$MY_HOST" -P"$MY_PORT" --connect-timeout=3 -e \
       "SELECT table_schema AS db, ROUND(SUM(data_length+index_length)/1024/1024,2) AS MB FROM information_schema.tables GROUP BY table_schema ORDER BY SUM(data_length+index_length);" \
       2>&1 | head -n 30
     return 0
@@ -329,13 +329,13 @@ test_mysql() {
     return 1
   fi
   echo "[*] mysqladmin ping (timeout $TIMEOUT_S dtk)..."
-  if ct_mysqladmin_ping "$MY_CT" -u"$MY_USER" "$PASSARG" 2>&1 | grep -qi alive; then
+  if ct_mysqladmin_ping "$MY_CT" -u"$MY_USER" ${PASSARG:+"$PASSARG"} 2>&1 | grep -qi alive; then
     echo "[+] mysql ping OK (alive)"
   else
-    echo "[-] mysql ping GAGAL:"; ct_mysqladmin_ping "$MY_CT" -u"$MY_USER" "$PASSARG" 2>&1 | head -n 5; return 1
+    echo "[-] mysql ping GAGAL:"; ct_mysqladmin_ping "$MY_CT" -u"$MY_USER" ${PASSARG:+"$PASSARG"} 2>&1 | head -n 5; return 1
   fi
   echo "[*] SELECT 1 + ukuran tiap DB (paling kecil = paling cepet di-backup)..."
-  ct_mysql_exec "$MY_CT" -u"$MY_USER" "$PASSARG" -e \
+  ct_mysql_exec "$MY_CT" -u"$MY_USER" ${PASSARG:+"$PASSARG"} -e \
     "SELECT 1 AS ok; SELECT table_schema AS db, ROUND(SUM(data_length+index_length)/1024/1024,2) AS MB FROM information_schema.tables GROUP BY table_schema ORDER BY SUM(data_length+index_length);" \
     2>&1 | head -n 30
 }
@@ -430,14 +430,14 @@ do_backup_mysql() {
   if [ "${MODE:-docker}" = "host" ]; then
     if [ "$MY_DB" = "all" ]; then out="$BACKUP_DIR/mysql_all_$ts.sql.gz";
       echo "[$(date '+%F %T')] MySQL[host] backup --all-databases -> $out" | tee -a "$LOG_FILE"
-      if ct_mysqldump "" -u"$MY_USER" "$PASSARG" -h"$MY_HOST" -P"$MY_PORT" \
+      if ct_mysqldump "" -u"$MY_USER" ${PASSARG:+"$PASSARG"} -h"$MY_HOST" -P"$MY_PORT" \
           --all-databases --single-transaction --quick --skip-lock-tables 2>>"$LOG_FILE" | gzip -1 > "$out" \
           && verify_out "$out"; then
         echo "[+] MySQL OK: $(du -h "$out" | cut -f1) $out" | tee -a "$LOG_FILE"
       else echo "[-] MySQL GAGAL" | tee -a "$LOG_FILE"; rm -f "$out"; return 1; fi
     else out="$BACKUP_DIR/mysql_${MY_DB}_$ts.sql.gz";
       echo "[$(date '+%F %T')] MySQL[host] backup $MY_DB -> $out" | tee -a "$LOG_FILE"
-      if ct_mysqldump "" -u"$MY_USER" "$PASSARG" -h"$MY_HOST" -P"$MY_PORT" \
+      if ct_mysqldump "" -u"$MY_USER" ${PASSARG:+"$PASSARG"} -h"$MY_HOST" -P"$MY_PORT" \
           "$MY_DB" --single-transaction --quick --skip-lock-tables 2>>"$LOG_FILE" | gzip -1 > "$out" \
           && verify_out "$out"; then
         echo "[+] MySQL OK: $(du -h "$out" | cut -f1) $out" | tee -a "$LOG_FILE"
@@ -450,7 +450,7 @@ do_backup_mysql() {
     echo "[$(date '+%F %T')] MySQL backup --all-databases -> $out" | tee -a "$LOG_FILE"
     if ! have_container "$MY_CT"; then echo "[-] skip mysql: container stop" | tee -a "$LOG_FILE"; return 1; fi
     # --single-transaction --quick = cepat & non-blocking InnoDB; skip-lock biar ga lock
-    if ct_mysqldump "$MY_CT" -u"$MY_USER" "$PASSARG" \
+    if ct_mysqldump "$MY_CT" -u"$MY_USER" ${PASSARG:+"$PASSARG"} \
         --all-databases --single-transaction --quick --skip-lock-tables 2>>"$LOG_FILE" | gzip -1 > "$out" \
         && verify_out "$out"; then
       echo "[+] MySQL OK: $(du -h "$out" | cut -f1) $out" | tee -a "$LOG_FILE"
@@ -461,7 +461,7 @@ do_backup_mysql() {
     out="$BACKUP_DIR/mysql_${MY_DB}_$ts.sql.gz"
     echo "[$(date '+%F %T')] MySQL backup $MY_DB -> $out" | tee -a "$LOG_FILE"
     if ! have_container "$MY_CT"; then echo "[-] skip mysql: container stop" | tee -a "$LOG_FILE"; return 1; fi
-    if ct_mysqldump "$MY_CT" -u"$MY_USER" "$PASSARG" \
+    if ct_mysqldump "$MY_CT" -u"$MY_USER" ${PASSARG:+"$PASSARG"} \
         "$MY_DB" --single-transaction --quick --skip-lock-tables 2>>"$LOG_FILE" | gzip -1 > "$out" \
         && verify_out "$out"; then
       echo "[+] MySQL OK: $(du -h "$out" | cut -f1) $out" | tee -a "$LOG_FILE"
@@ -633,7 +633,8 @@ do_update() {
   NV=$(grep '^APP_VERSION=' "$TMP" | cut -d'"' -f2)
   cp "$SELF" "$SELF.bak_$(date +%Y%m%d_%H%M%S)"
   cat "$TMP" > "$SELF" && chmod +x "$SELF" && rm -f "$TMP"
-  echo "[+] Update OK → $NV (backup lama: $SELF.bak_*). Jalankan ulang script."
+  echo "[+] Update OK → $NV (backup lama: $SELF.bak_*). Restart ke versi baru..."
+  exec "$SELF" || { echo "[-] restart otomatis gagal, jalankan ulang manual: $SELF"; exit 1; }
 }
 
 menu() {
