@@ -553,11 +553,24 @@ PYEOF
 
 # ------------------------------------------------- Update dari repo GitHub
 remote_ver() {
-  local url="https://raw.githubusercontent.com/$REPO/main/VERSION"
+  # API GitHub selalu fresh (raw.githubusercontent di-cache CDN ~5 mnt).
+  # API primer -> raw fallback (buat server yg blokir api.github.com / kena rate-limit).
   local v=""
-  if command -v curl >/dev/null 2>&1; then v=$(curl -fsSL --max-time 10 "$url" 2>/dev/null);
-  elif command -v wget >/dev/null 2>&1; then v=$(wget -qO- --timeout=10 "$url" 2>/dev/null); fi
-  echo "$v" | tr -d '[:space:]'
+  v=$(remote_ver_api)
+  if [ -z "$v" ]; then
+    local url="https://raw.githubusercontent.com/$REPO/main/VERSION"
+    if command -v curl >/dev/null 2>&1; then v=$(curl -fsSL --max-time 10 "$url" 2>/dev/null);
+    elif command -v wget >/dev/null 2>&1; then v=$(wget -qO- --timeout=10 "$url" 2>/dev/null); fi
+  fi
+  v=$(echo "$v" | tr -d '[:space:]')
+  echo "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' && echo "$v" || echo ""
+}
+remote_ver_api() {
+  local j=""
+  if command -v curl >/dev/null 2>&1; then j=$(curl -fsSL --max-time 10 "https://api.github.com/repos/$REPO/contents/VERSION" 2>/dev/null);
+  elif command -v wget >/dev/null 2>&1; then j=$(wget -qO- --timeout=10 "https://api.github.com/repos/$REPO/contents/VERSION" 2>/dev/null); fi
+  [ -z "$j" ] && return 1
+  echo "$j" | python3 -c "import sys,json,base64; print(base64.b64decode(json.load(sys.stdin)['content']).decode().strip())" 2>/dev/null
 }
 check_update() {
   echo "--- Cek update $APP_NAME ---"
