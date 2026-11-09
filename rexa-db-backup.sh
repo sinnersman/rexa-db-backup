@@ -54,6 +54,7 @@ init_config() {
     cat > "$CONFIG_FILE" << 'EOF'
 {
   "mode": "docker",
+  "db_target": "both",
   "db_type": "mysql",
   "socket_path": "/opt/lampp/var/mysql/mysql.sock",
   "pg_container": "datasetsync-db",
@@ -84,6 +85,7 @@ read_config() {
   # python3 preferred, fallback: busybox sh parse sederhana
   if command -v python3 >/dev/null 2>&1; then
     MODE=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('mode','docker'))")
+    DB_TARGET=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('db_target','both'))")
     DB_TYPE=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('db_type','mysql'))")
     SOCKET_PATH=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('socket_path','/opt/lampp/var/mysql/mysql.sock'))")
     PG_CT=$(python3 -c "import json;print(json.load(open('$CONFIG_FILE')).get('pg_container','datasetsync-db'))")
@@ -345,13 +347,21 @@ test_all() {
   # Mode host/TCP: pastikan port DB bisa ditembak dulu sebelum auth
   if [ "${MODE:-docker}" = "host" ]; then
     echo "--- Pra-cek TCP (tanpa auth, timeout 3 dtk) ---"
-    if tcp_check "$PG_HOST" "$PG_PORT"; then echo "[+] TCP PG $PG_HOST:$PG_PORT OPEN";
-    else echo "[-] TCP PG $PG_HOST:$PG_PORT CLOSED/filtered — cek IP/port/firewall dulu!"; fi
-    if tcp_check "$MY_HOST" "$MY_PORT"; then echo "[+] TCP MySQL $MY_HOST:$MY_PORT OPEN";
-    else echo "[-] TCP MySQL $MY_HOST:$MY_PORT CLOSED/filtered — cek IP/port/firewall dulu!"; fi
+    if [ "${DB_TARGET:-both}" != "mysql" ]; then
+      if tcp_check "$PG_HOST" "$PG_PORT"; then echo "[+] TCP PG $PG_HOST:$PG_PORT OPEN";
+      else echo "[-] TCP PG $PG_HOST:$PG_PORT CLOSED/filtered — cek IP/port/firewall dulu!"; fi
+    fi
+    if [ "${DB_TARGET:-both}" != "pg" ]; then
+      if tcp_check "$MY_HOST" "$MY_PORT"; then echo "[+] TCP MySQL $MY_HOST:$MY_PORT OPEN";
+      else echo "[-] TCP MySQL $MY_HOST:$MY_PORT CLOSED/filtered — cek IP/port/firewall dulu!"; fi
+    fi
     echo ""
   fi
-  test_pg; echo; test_mysql
+  case "${DB_TARGET:-both}" in
+    pg) test_pg ;;
+    mysql) test_mysql ;;
+    *) test_pg; echo; test_mysql ;;
+  esac
 }
 
 # Validasi hasil backup: file harus ada & >100 byte (cegah sukses palsu / dump kosong)
@@ -375,6 +385,10 @@ do_backup_pg() {
   if [ "${MODE:-docker}" = "socket" ]; then
     if [ "${DB_TYPE:-mysql}" = "pgsql" ]; then do_backup_socket_pg; return $?; fi
     echo "[i] skip PG (mode socket, db_type=${DB_TYPE:-mysql})" | tee -a "$LOG_FILE"; return 0
+  fi
+  # Target mysql saja: skip sisi PG
+  if [ "${DB_TARGET:-both}" = "mysql" ]; then
+    echo "[i] skip PG (db_target=mysql)" | tee -a "$LOG_FILE"; return 0
   fi
   out="$BACKUP_DIR/pg_${PG_DB}_$ts.sql.gz"
   echo "[$(date '+%F %T')] PG backup $PG_DB -> $out [mode=${MODE:-docker}]" | tee -a "$LOG_FILE"
@@ -407,6 +421,10 @@ do_backup_mysql() {
   if [ "${MODE:-docker}" = "socket" ]; then
     if [ "${DB_TYPE:-mysql}" != "pgsql" ]; then do_backup_socket_mysql; return $?; fi
     echo "[i] skip MySQL (mode socket, db_type=pgsql)" | tee -a "$LOG_FILE"; return 0
+  fi
+  # Target pg saja: skip sisi MySQL
+  if [ "${DB_TARGET:-both}" = "pg" ]; then
+    echo "[i] skip MySQL (db_target=pg)" | tee -a "$LOG_FILE"; return 0
   fi
   # Mode host langsung (bukan container): mysqldump/mariadb-dump ke host:port
   if [ "${MODE:-docker}" = "host" ]; then
@@ -507,38 +525,52 @@ edit_config_simple() {
       fi
       ;;
     host)
+      printf "backup DB apa? [pg/mysql/both] [%s]: " "$DB_TARGET"; read -r v
+      v=$(echo "${v:-$DB_TARGET}" | tr '[:upper:]' '[:lower:]')
+      case "$v" in pg|mysql|both) DB_TARGET="$v";; *) echo "[i] tidak dikenal, tetap: $DB_TARGET";; esac
+      if [ "$DB_TARGET" != "mysql" ]; then
       echo "-- PostgreSQL (TCP) --"
       printf "pg_host:port [%s:%s]: " "$PG_HOST" "$PG_PORT"; read -r h p; PG_HOST=${h:-$PG_HOST}; PG_PORT=${p:-$PG_PORT}
       printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
       printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
       printf "pg_db (pilih yg KECIL biar cepet) [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
+      fi
+      if [ "$DB_TARGET" != "pg" ]; then
       echo "-- MySQL/MariaDB (TCP) --"
       printf "mysql_host:port [%s:%s]: " "$MY_HOST" "$MY_PORT"; read -r h p; MY_HOST=${h:-$MY_HOST}; MY_PORT=${p:-$MY_PORT}
       printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
       printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
       printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
+      fi
       ;;
     *)
+      printf "backup DB apa? [pg/mysql/both] [%s]: " "$DB_TARGET"; read -r v
+      v=$(echo "${v:-$DB_TARGET}" | tr '[:upper:]' '[:lower:]')
+      case "$v" in pg|mysql|both) DB_TARGET="$v";; *) echo "[i] tidak dikenal, tetap: $DB_TARGET";; esac
+      if [ "$DB_TARGET" != "mysql" ]; then
       echo "-- PostgreSQL (container) --"
       printf "pg_container [%s]: " "$PG_CT"; read -r v; PG_CT=${v:-$PG_CT}
       printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
       printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
       printf "pg_db (pilih yg KECIL biar cepet) [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
+      fi
+      if [ "$DB_TARGET" != "pg" ]; then
       echo "-- MySQL/MariaDB (container) --"
       printf "mysql_container [%s]: " "$MY_CT"; read -r v; MY_CT=${v:-$MY_CT}
       printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
       printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
       printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
+      fi
       ;;
   esac
   printf "backup_dir [%s]: " "$BACKUP_DIR"; read -r v; BACKUP_DIR=${v:-$BACKUP_DIR}
   printf "jam [HH MM] [%s %s]: " "$BACKUP_HOUR" "$BACKUP_MINUTE"; read -r h m; BACKUP_HOUR=${h:-$BACKUP_HOUR}; BACKUP_MINUTE=${m:-$BACKUP_MINUTE}
   printf "retain_days [%s]: " "$RETAIN_DAYS"; read -r v; RETAIN_DAYS=${v:-$RETAIN_DAYS}
-  python3 - "$CONFIG_FILE" "$MODE" "$DB_TYPE" "$SOCKET_PATH" "$PG_CT" "$PG_USER" "$PG_PASS" "$PG_DB" "$PG_HOST" "$PG_PORT" "$MY_CT" "$MY_USER" "$MY_PASS" "$MY_DB" "$MY_HOST" "$MY_PORT" "$BACKUP_DIR" "$BACKUP_HOUR" "$BACKUP_MINUTE" "$RETAIN_DAYS" << 'PYEOF'
+  python3 - "$CONFIG_FILE" "$MODE" "$DB_TARGET" "$DB_TYPE" "$SOCKET_PATH" "$PG_CT" "$PG_USER" "$PG_PASS" "$PG_DB" "$PG_HOST" "$PG_PORT" "$MY_CT" "$MY_USER" "$MY_PASS" "$MY_DB" "$MY_HOST" "$MY_PORT" "$BACKUP_DIR" "$BACKUP_HOUR" "$BACKUP_MINUTE" "$RETAIN_DAYS" << 'PYEOF'
 import json,sys
-f,mode,dbt,sp,pgct,pgu,pgp,pgdb,pgh,pgp2,myct,myu,myp,mydb,myh,myp2,bdir,bh,bm,ret = sys.argv[1:]
+f,mode,dbtgt,dbt,sp,pgct,pgu,pgp,pgdb,pgh,pgp2,myct,myu,myp,mydb,myh,myp2,bdir,bh,bm,ret = sys.argv[1:]
 d = json.load(open(f))
-d.update({"mode":mode or "docker","db_type":dbt or "mysql","socket_path":sp,
+d.update({"mode":mode or "docker","db_target":dbtgt or "both","db_type":dbt or "mysql","socket_path":sp,
  "pg_container":pgct,"pg_user":pgu,"pg_password":pgp,"pg_db":pgdb,
  "pg_host":pgh,"pg_port":int(pgp2) if str(pgp2).isdigit() else 5432,
  "mysql_container":myct,"mysql_user":myu,"mysql_password":myp,"mysql_db":mydb,
