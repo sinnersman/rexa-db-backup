@@ -1,0 +1,51 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  release:
+    # Jangan rilis dari commit bump versi sendiri (cegah loop).
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cek sintaks script
+        run: bash -n rexa-db-backup.sh
+
+      - name: Naikkan versi patch
+        id: ver
+        run: |
+          CUR=$(tr -d '[:space:]' < VERSION)
+          MAJOR=$(echo "$CUR" | cut -d. -f1)
+          MINOR=$(echo "$CUR" | cut -d. -f2)
+          PATCH=$(echo "$CUR" | cut -d. -f3)
+          NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
+          echo "$NEXT" > VERSION
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Rilis v$NEXT (dari $CUR)"
+
+      - name: Commit bump versi
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: release v${{ steps.ver.outputs.version }} [skip ci]"
+          git push
+
+      - name: Buat tag + GitHub Release
+        run: |
+          V="${{ steps.ver.outputs.version }}"
+          git tag "v$V"
+          git push origin "v$V"
+          gh release create "v$V" rexa-db-backup.sh \
+            --title "v$V" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
