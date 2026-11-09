@@ -487,19 +487,50 @@ edit_config_simple() {
   echo "--- Config sekarang ($CONFIG_FILE) ---"
   cat "$CONFIG_FILE"
   echo "--- Edit cepat (Enter = keep) ---"
-  printf "mode (docker=container / host=TCP / socket=XAMPP-lokal) [%s]: " "$MODE"; read -r v; MODE=${v:-$MODE}
-  printf "db_type utk mode socket (mysql/mariadb/pgsql) [%s]: " "$DB_TYPE"; read -r v; DB_TYPE=${v:-$DB_TYPE}
-  printf "socket_path (mode socket) [%s]: " "$SOCKET_PATH"; read -r v; SOCKET_PATH=${v:-$SOCKET_PATH}
-  printf "pg_container [%s]: " "$PG_CT"; read -r v; PG_CT=${v:-$PG_CT}
-  printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
-  printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
-  printf "pg_db (pilih yg KECIL biar cepet) [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
-  printf "pg_host:port (mode host) [%s:%s]: " "$PG_HOST" "$PG_PORT"; read -r h p; PG_HOST=${h:-$PG_HOST}; PG_PORT=${p:-$PG_PORT}
-  printf "mysql_container [%s]: " "$MY_CT"; read -r v; MY_CT=${v:-$MY_CT}
-  printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
-  printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
-  printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
-  printf "mysql_host:port (mode host) [%s:%s]: " "$MY_HOST" "$MY_PORT"; read -r h p; MY_HOST=${h:-$MY_HOST}; MY_PORT=${p:-$MY_PORT}
+  printf "mode [docker=container / host=TCP / socket=XAMPP-lokal] [%s]: " "$MODE"; read -r v
+  v=$(echo "${v:-$MODE}" | tr '[:upper:]' '[:lower:]')
+  case "$v" in docker|host|socket) MODE="$v";; *) echo "[i] mode tidak dikenal, tetap: $MODE";; esac
+  case "$MODE" in
+    socket)
+      printf "db_type [mysql/mariadb/pgsql] [%s]: " "$DB_TYPE"; read -r v; DB_TYPE=${v:-$DB_TYPE}
+      printf "socket_path [%s]: " "$SOCKET_PATH"; read -r v; SOCKET_PATH=${v:-$SOCKET_PATH}
+      if [ "$DB_TYPE" = "pgsql" ]; then
+        echo "-- PostgreSQL (socket) --"
+        printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
+        printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
+        printf "pg_db (pilih yg KECIL / 'all') [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
+      else
+        echo "-- MySQL/MariaDB (socket) --"
+        printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
+        printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
+        printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
+      fi
+      ;;
+    host)
+      echo "-- PostgreSQL (TCP) --"
+      printf "pg_host:port [%s:%s]: " "$PG_HOST" "$PG_PORT"; read -r h p; PG_HOST=${h:-$PG_HOST}; PG_PORT=${p:-$PG_PORT}
+      printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
+      printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
+      printf "pg_db (pilih yg KECIL biar cepet) [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
+      echo "-- MySQL/MariaDB (TCP) --"
+      printf "mysql_host:port [%s:%s]: " "$MY_HOST" "$MY_PORT"; read -r h p; MY_HOST=${h:-$MY_HOST}; MY_PORT=${p:-$MY_PORT}
+      printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
+      printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
+      printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
+      ;;
+    *)
+      echo "-- PostgreSQL (container) --"
+      printf "pg_container [%s]: " "$PG_CT"; read -r v; PG_CT=${v:-$PG_CT}
+      printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
+      printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
+      printf "pg_db (pilih yg KECIL biar cepet) [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
+      echo "-- MySQL/MariaDB (container) --"
+      printf "mysql_container [%s]: " "$MY_CT"; read -r v; MY_CT=${v:-$MY_CT}
+      printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
+      printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
+      printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
+      ;;
+  esac
   printf "backup_dir [%s]: " "$BACKUP_DIR"; read -r v; BACKUP_DIR=${v:-$BACKUP_DIR}
   printf "jam [HH MM] [%s %s]: " "$BACKUP_HOUR" "$BACKUP_MINUTE"; read -r h m; BACKUP_HOUR=${h:-$BACKUP_HOUR}; BACKUP_MINUTE=${m:-$BACKUP_MINUTE}
   printf "retain_days [%s]: " "$RETAIN_DAYS"; read -r v; RETAIN_DAYS=${v:-$RETAIN_DAYS}
