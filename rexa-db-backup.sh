@@ -125,6 +125,7 @@ check_dependencies() {
   command -v python3 >/dev/null 2>&1 || need="$need python3"
   command -v gzip >/dev/null 2>&1 || need="$need gzip"
   command -v crontab >/dev/null 2>&1 || need="$need cron"
+  command -v whiptail >/dev/null 2>&1 || need="$need gui-whiptail"
   # client DB wajib di mode host/socket (langsung tanpa container)
   if [ "${MODE:-docker}" != "docker" ]; then
     (command -v pg_isready >/dev/null 2>&1 || command -v psql >/dev/null 2>&1) || need="$need pg-client"
@@ -137,14 +138,16 @@ check_dependencies() {
   if [ "$os" = "alpine" ]; then
     apk update && apk add --no-cache python3 gzip bash busybox-suid \
       $([ "${MODE:-docker}" = "docker" ] && echo "podman") \
-      $([ "${MODE:-docker}" != "docker" ] && echo "postgresql16-client mariadb-client")
+      $([ "${MODE:-docker}" != "docker" ] && echo "postgresql16-client mariadb-client") \
+      $(echo "$need" | grep -q "gui-whiptail" && echo "newt")
     rc-update add cgroups boot 2>/dev/null || true
     rc-update add crond boot 2>/dev/null || true
     rc-service crond start 2>/dev/null || crond 2>/dev/null || true
   elif [ "$os" = "ubuntu" ]; then
     sudo apt-get update && sudo apt-get install -y python3 gzip bash cron \
       $([ "${MODE:-docker}" = "docker" ] && echo "podman") \
-      $([ "${MODE:-docker}" != "docker" ] && echo "postgresql-client mariadb-client")
+      $([ "${MODE:-docker}" != "docker" ] && echo "postgresql-client mariadb-client") \
+      $(echo "$need" | grep -q "gui-whiptail" && echo "whiptail")
     sudo systemctl enable --now cron 2>/dev/null || sudo service cron start 2>/dev/null || true
   else
     echo "[-] OS tidak dikenal (bukan apk/apt). Install manual:$need" >&2
@@ -502,70 +505,67 @@ cron_off() {
 
 edit_config_simple() {
   read_config
-  echo "--- Config sekarang ($CONFIG_FILE) ---"
-  cat "$CONFIG_FILE"
-  echo "--- Edit cepat (Enter = keep) ---"
-  printf "mode [docker=container / host=TCP / socket=XAMPP-lokal] [%s]: " "$MODE"; read -r v
-  v=$(echo "${v:-$MODE}" | tr '[:upper:]' '[:lower:]')
-  case "$v" in docker|host|socket) MODE="$v";; *) echo "[i] mode tidak dikenal, tetap: $MODE";; esac
+  if tui_on; then
+    whiptail --backtitle "$(tui_back)" --title "Config sekarang" --msgbox "$(cat "$CONFIG_FILE")" 20 72
+  else
+    echo "--- Config sekarang ($CONFIG_FILE) ---"
+    cat "$CONFIG_FILE"
+    echo "--- Edit cepat (Enter = keep) ---"
+  fi
+  MODE=$(tui_pick "Mode koneksi" "Pilih cara backup:" "$MODE" docker host socket)
+  case "$MODE" in docker|host|socket) ;; *) echo "[i] mode tidak dikenal, tetap: ${MODE:-docker}"; read_config; esac
   case "$MODE" in
     socket)
-      printf "db_type [mysql/mariadb/pgsql] [%s]: " "$DB_TYPE"; read -r v; DB_TYPE=${v:-$DB_TYPE}
-      printf "socket_path [%s]: " "$SOCKET_PATH"; read -r v; SOCKET_PATH=${v:-$SOCKET_PATH}
+      DB_TYPE=$(tui_pick "Tipe database" "DB lokal via socket:" "$DB_TYPE" mysql mariadb pgsql)
+      SOCKET_PATH=$(tui_ask "Socket path" "Path unix socket:" "$SOCKET_PATH")
       if [ "$DB_TYPE" = "pgsql" ]; then
-        echo "-- PostgreSQL (socket) --"
-        printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
-        printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
-        printf "pg_db (pilih yg KECIL / 'all') [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
+        PG_USER=$(tui_ask "PostgreSQL (socket)" "User:" "$PG_USER")
+        v=$(tui_pass "PostgreSQL (socket)" "Password (batal = keep):"); [ -n "$v" ] && PG_PASS=$v
+        PG_DB=$(tui_ask "PostgreSQL (socket)" "Database (kecil / 'all'):" "$PG_DB")
       else
-        echo "-- MySQL/MariaDB (socket) --"
-        printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
-        printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
-        printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
+        MY_USER=$(tui_ask "MySQL/MariaDB (socket)" "User:" "$MY_USER")
+        v=$(tui_pass "MySQL/MariaDB (socket)" "Password (kosong = tanpa pw, batal = keep):"); [ -n "$v" ] && MY_PASS=$v
+        MY_DB=$(tui_ask "MySQL/MariaDB (socket)" "Database (kecil / 'all'):" "$MY_DB")
       fi
       ;;
     host)
-      printf "backup DB apa? [pg/mysql/both] [%s]: " "$DB_TARGET"; read -r v
-      v=$(echo "${v:-$DB_TARGET}" | tr '[:upper:]' '[:lower:]')
-      case "$v" in pg|mysql|both) DB_TARGET="$v";; *) echo "[i] tidak dikenal, tetap: $DB_TARGET";; esac
+      DB_TARGET=$(tui_pick "Target backup" "Backup DB apa?" "$DB_TARGET" pg mysql both)
       if [ "$DB_TARGET" != "mysql" ]; then
-      echo "-- PostgreSQL (TCP) --"
-      printf "pg_host:port [%s:%s]: " "$PG_HOST" "$PG_PORT"; read -r h p; PG_HOST=${h:-$PG_HOST}; PG_PORT=${p:-$PG_PORT}
-      printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
-      printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
-      printf "pg_db (pilih yg KECIL biar cepet) [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
+        PG_HOST=$(tui_ask "PostgreSQL (TCP)" "Host:" "$PG_HOST")
+        PG_PORT=$(tui_ask "PostgreSQL (TCP)" "Port:" "$PG_PORT")
+        PG_USER=$(tui_ask "PostgreSQL (TCP)" "User:" "$PG_USER")
+        v=$(tui_pass "PostgreSQL (TCP)" "Password (batal = keep):"); [ -n "$v" ] && PG_PASS=$v
+        PG_DB=$(tui_ask "PostgreSQL (TCP)" "Database (kecil):" "$PG_DB")
       fi
       if [ "$DB_TARGET" != "pg" ]; then
-      echo "-- MySQL/MariaDB (TCP) --"
-      printf "mysql_host:port [%s:%s]: " "$MY_HOST" "$MY_PORT"; read -r h p; MY_HOST=${h:-$MY_HOST}; MY_PORT=${p:-$MY_PORT}
-      printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
-      printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
-      printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
+        MY_HOST=$(tui_ask "MySQL/MariaDB (TCP)" "Host:" "$MY_HOST")
+        MY_PORT=$(tui_ask "MySQL/MariaDB (TCP)" "Port:" "$MY_PORT")
+        MY_USER=$(tui_ask "MySQL/MariaDB (TCP)" "User:" "$MY_USER")
+        v=$(tui_pass "MySQL/MariaDB (TCP)" "Password (kosong = tanpa pw, batal = keep):"); [ -n "$v" ] && MY_PASS=$v
+        MY_DB=$(tui_ask "MySQL/MariaDB (TCP)" "Database (kecil / 'all'):" "$MY_DB")
       fi
       ;;
     *)
-      printf "backup DB apa? [pg/mysql/both] [%s]: " "$DB_TARGET"; read -r v
-      v=$(echo "${v:-$DB_TARGET}" | tr '[:upper:]' '[:lower:]')
-      case "$v" in pg|mysql|both) DB_TARGET="$v";; *) echo "[i] tidak dikenal, tetap: $DB_TARGET";; esac
+      MODE="docker"
+      DB_TARGET=$(tui_pick "Target backup" "Backup DB apa?" "$DB_TARGET" pg mysql both)
       if [ "$DB_TARGET" != "mysql" ]; then
-      echo "-- PostgreSQL (container) --"
-      printf "pg_container [%s]: " "$PG_CT"; read -r v; PG_CT=${v:-$PG_CT}
-      printf "pg_user [%s]: " "$PG_USER"; read -r v; PG_USER=${v:-$PG_USER}
-      printf "pg_password [%s]: " "$( [ -n "$PG_PASS" ] && echo '***' || echo kosong)"; read -r v; [ -n "$v" ] && PG_PASS=$v
-      printf "pg_db (pilih yg KECIL biar cepet) [%s]: " "$PG_DB"; read -r v; PG_DB=${v:-$PG_DB}
+        PG_CT=$(tui_ask "PostgreSQL (container)" "Nama container:" "$PG_CT")
+        PG_USER=$(tui_ask "PostgreSQL (container)" "User:" "$PG_USER")
+        v=$(tui_pass "PostgreSQL (container)" "Password (batal = keep):"); [ -n "$v" ] && PG_PASS=$v
+        PG_DB=$(tui_ask "PostgreSQL (container)" "Database (kecil):" "$PG_DB")
       fi
       if [ "$DB_TARGET" != "pg" ]; then
-      echo "-- MySQL/MariaDB (container) --"
-      printf "mysql_container [%s]: " "$MY_CT"; read -r v; MY_CT=${v:-$MY_CT}
-      printf "mysql_user [%s]: " "$MY_USER"; read -r v; MY_USER=${v:-$MY_USER}
-      printf "mysql_password (kosongkan bila tanpa pw): "; read -rs v; echo; [ -n "$v" ] && MY_PASS=$v
-      printf "mysql_db (nama db KECIL / 'all') [%s]: " "$MY_DB"; read -r v; MY_DB=${v:-$MY_DB}
+        MY_CT=$(tui_ask "MySQL/MariaDB (container)" "Nama container:" "$MY_CT")
+        MY_USER=$(tui_ask "MySQL/MariaDB (container)" "User:" "$MY_USER")
+        v=$(tui_pass "MySQL/MariaDB (container)" "Password (kosong = tanpa pw, batal = keep):"); [ -n "$v" ] && MY_PASS=$v
+        MY_DB=$(tui_ask "MySQL/MariaDB (container)" "Database (kecil / 'all'):" "$MY_DB")
       fi
       ;;
   esac
-  printf "backup_dir [%s]: " "$BACKUP_DIR"; read -r v; BACKUP_DIR=${v:-$BACKUP_DIR}
-  printf "jam [HH MM] [%s %s]: " "$BACKUP_HOUR" "$BACKUP_MINUTE"; read -r h m; BACKUP_HOUR=${h:-$BACKUP_HOUR}; BACKUP_MINUTE=${m:-$BACKUP_MINUTE}
-  printf "retain_days [%s]: " "$RETAIN_DAYS"; read -r v; RETAIN_DAYS=${v:-$RETAIN_DAYS}
+  BACKUP_DIR=$(tui_ask "Penyimpanan" "Direktori backup:" "$BACKUP_DIR")
+  BACKUP_HOUR=$(tui_ask "Jadwal" "Jam backup (00-23):" "$BACKUP_HOUR")
+  BACKUP_MINUTE=$(tui_ask "Jadwal" "Menit backup:" "$BACKUP_MINUTE")
+  RETAIN_DAYS=$(tui_ask "Retensi" "Hapus file > N hari:" "$RETAIN_DAYS")
   python3 - "$CONFIG_FILE" "$MODE" "$DB_TARGET" "$DB_TYPE" "$SOCKET_PATH" "$PG_CT" "$PG_USER" "$PG_PASS" "$PG_DB" "$PG_HOST" "$PG_PORT" "$MY_CT" "$MY_USER" "$MY_PASS" "$MY_DB" "$MY_HOST" "$MY_PORT" "$BACKUP_DIR" "$BACKUP_HOUR" "$BACKUP_MINUTE" "$RETAIN_DAYS" << 'PYEOF'
 import json,sys
 f,mode,dbtgt,dbt,sp,pgct,pgu,pgp,pgdb,pgh,pgp2,myct,myu,myp,mydb,myh,myp2,bdir,bh,bm,ret = sys.argv[1:]
@@ -637,9 +637,47 @@ do_update() {
   exec "$SELF" || { echo "[-] restart otomatis gagal, jalankan ulang manual: $SELF"; exit 1; }
 }
 
+# ------------------------------------------------- Lapisan TUI (whiptail) + fallback teks
+# GUI dipakai bila whiptail ada + stdin/stdout terminal + tidak dipaksa teks (REXA_TEXT=1).
+tui_on() { command -v whiptail >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ] && [ -z "${REXA_TEXT:-}" ]; }
+tui_back() { echo "$APP_NAME $APP_VERSION | $(os_info) | mode: ${MODE:-docker}"; }
+tui_ask() { # $1=judul $2=prompt $3=default -> stdout nilai (batal=keep default)
+  if tui_on; then whiptail --backtitle "$(tui_back)" --title "$1" --inputbox "$2" 10 65 "$3" 3>&1 1>&2 2>&3 || echo "$3";
+  else printf "%s [%s]: " "$2" "$3" >&2; read -r v || v=""; echo "${v:-$3}"; fi
+}
+tui_pass() { # $1=judul $2=prompt -> stdout password (batal="")
+  if tui_on; then whiptail --backtitle "$(tui_back)" --title "$1" --passwordbox "$2" 10 65 3>&1 1>&2 2>&3 || echo "";
+  else printf "%s: " "$2" >&2; read -rs v || v=""; echo >&2; echo "$v"; fi
+}
+tui_pick() { # $1=judul $2=prompt $3=default $4..=opsi -> stdout pilihan
+  if tui_on; then
+    local t="$1" p="$2" d="$3"; shift 3
+    local args=()
+    for o in "$@"; do if [ "$o" = "$d" ]; then args+=("$o" "" ON); else args+=("$o" "" OFF); fi; done
+    whiptail --backtitle "$(tui_back)" --title "$t" --radiolist "$p" 16 65 "$#" "${args[@]}" 3>&1 1>&2 2>&3 || echo "$d"
+  else
+    printf "%s (opsi: %s) [%s]: " "$2" "$*" "$3" >&2; read -r v || v=""; echo "${v:-$3}"
+  fi
+}
+
 menu() {
   while true; do
     read_config
+    if tui_on; then
+      c=$(whiptail --backtitle "$(tui_back)" --title "Menu utama" --cancel-button "Keluar" \
+        --menu "Pilih aksi:" 22 72 11 \
+        "1" "Cek & install deps (apk/apt)" \
+        "2" "Edit config (mode + koneksi + db)" \
+        "3" "Tes koneksi CEPAT (wajib sebelum backup)" \
+        "4" "Backup sekarang" \
+        "5" "Backup PG saja" \
+        "6" "Backup MySQL saja" \
+        "7" "Cron ON (backup otomatis harian)" \
+        "8" "Cron OFF + lihat log" \
+        "9" "Cek update dari repo (lokal $APP_VERSION)" \
+        "10" "Update script ke versi terbaru" \
+        "11" "Keluar" 3>&1 1>&2 2>&3) || exit 0
+    else
     echo ""
     echo "================================================================"
     echo "  $APP_NAME"
@@ -659,7 +697,8 @@ menu() {
     echo "----------------------------------------------------------------"
     echo "  $APP_FOOTER"
     echo "================================================================"
-    printf "Pilih [1-11]: "; read -r c
+    printf "Pilih [1-11]: "; read -r c || exit 0
+    fi
     case "$c" in
       1) check_dependencies ;;
       2) edit_config_simple ;;
