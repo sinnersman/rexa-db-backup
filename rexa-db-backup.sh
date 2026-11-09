@@ -635,8 +635,9 @@ do_update() {
 }
 
 # ------------------------------------------------- Lapisan TUI (whiptail) + fallback teks
-# GUI dipakai bila whiptail ada + stdin/stdout terminal + tidak dipaksa teks (REXA_TEXT=1).
-tui_on() { command -v whiptail >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ] && [ -z "${REXA_TEXT:-}" ]; }
+# GUI dipakai bila whiptail ada + stdin terminal + tidak dipaksa teks (REXA_TEXT=1).
+# Cek stdin (bukan stdout) karena form dipanggil dalam $(...) yg stdout-nya pipe.
+tui_on() { command -v whiptail >/dev/null 2>&1 && [ -t 0 ] && [ -z "${REXA_TEXT:-}" ]; }
 tui_back() { echo "$APP_NAME $APP_VERSION | $(os_info) | mode: ${MODE:-docker}"; }
 # Buang sisa ketikan (mis. Enter dobel) biar dialog baru tidak ke-dismiss instan.
 tui_drain() { local _d; while read -t 0.2 -rs -n 1 _d; do :; done; }
@@ -649,14 +650,14 @@ tui_pass() { # $1=judul $2=prompt -> stdout password (batal="")
   else printf "%s: " "$2" >&2; read -rs v || v=""; echo >&2; echo "$v"; fi
 }
 tui_pick() { # $1=judul $2=prompt $3=default $4..=opsi -> stdout pilihan
+  local t="$1" p="$2" d="$3"; shift 3
   if tui_on; then
     tui_drain
-    local t="$1" p="$2" d="$3"; shift 3
     local args=()
     for o in "$@"; do if [ "$o" = "$d" ]; then args+=("$o" "" ON); else args+=("$o" "" OFF); fi; done
     whiptail --backtitle "$(tui_back)" --title "$t" --radiolist "$p" 16 65 "$#" "${args[@]}" 3>&1 1>&2 2>&3 || echo "$d"
   else
-    printf "%s (opsi: %s) [%s]: " "$2" "$*" "$3" >&2; read -r v || v=""; echo "${v:-$3}"
+    printf "%s (opsi: %s) [%s]: " "$p" "$*" "$d" >&2; read -r v || v=""; echo "${v:-$d}"
   fi
 }
 tui_box() { # $1=judul ; stdin -> textbox GUI (scroll) / cat teks
