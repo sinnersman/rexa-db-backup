@@ -131,10 +131,8 @@ check_dependencies() {
     (command -v pg_isready >/dev/null 2>&1 || command -v psql >/dev/null 2>&1) || need="$need pg-client"
     (command -v mysql >/dev/null 2>&1 || command -v mariadb >/dev/null 2>&1) || need="$need mysql-client"
   fi
-  if [ -z "$need" ]; then echo "[+] Deps OK."; return 0; fi
-  echo "[?] Kurang:$need — install sekarang? (y/n)"
-  read -r c
-  [ "$c" = "y" ] || return 0
+  if [ -z "$need" ]; then tui_msg "Dependensi" "Semua dependensi utama terpenuhi."; return 0; fi
+  tui_yesno "Dependensi" "Paket kurang:$need — install sekarang?" || return 0
   if [ "$os" = "alpine" ]; then
     apk update && apk add --no-cache python3 gzip bash busybox-suid \
       $([ "${MODE:-docker}" = "docker" ] && echo "podman") \
@@ -580,7 +578,7 @@ d.update({"mode":mode or "docker","db_target":dbtgt or "both","db_type":dbt or "
 json.dump(d, open(f,'w'), indent=2)
 PYEOF
   chmod 600 "$CONFIG_FILE"
-  echo "[+] Tersimpan."
+  tui_msg "Config" "Konfigurasi berhasil disimpan!"
 }
 
 # ------------------------------------------------- Update dari repo GitHub
@@ -620,16 +618,15 @@ do_update() {
   echo "--- Update $APP_NAME ---"
   RV=$(remote_ver)
   [ -z "$RV" ] && { echo "[-] gagal hubungi repo."; return 1; }
-  if [ "$RV" = "$APP_VERSION" ]; then echo "[+] Sudah terbaru ($APP_VERSION)."; return 0; fi
-  echo "[!] Akan update: $APP_VERSION -> $RV"
-  printf "Lanjut? (y/n): "; read -r c; [ "$c" = "y" ] || return 0
+  if [ "$RV" = "$APP_VERSION" ]; then tui_msg "Update $APP_NAME" "Sudah versi terbaru ($APP_VERSION)."; return 0; fi
+  tui_yesno "Update $APP_NAME" "Update $APP_VERSION -> $RV sekarang?" || return 0
   SELF="$(realpath "$0")"
   TMP="$(mktemp /tmp/rexa-update.XXXXXX)"
   URL="https://github.com/$REPO/releases/latest/download/rexa-db-backup.sh"
   if command -v curl >/dev/null 2>&1; then curl -fsSL --max-time 60 "$URL" -o "$TMP";
   else wget -q --timeout=60 -O "$TMP" "$URL"; fi
-  [ -s "$TMP" ] || { echo "[-] download gagal."; rm -f "$TMP"; return 1; }
-  bash -n "$TMP" || { echo "[-] file update rusak (sintaks), dibatalkan."; rm -f "$TMP"; return 1; }
+  [ -s "$TMP" ] || { tui_msg "Update $APP_NAME" "Download gagal, periksa koneksi."; rm -f "$TMP"; return 1; }
+  bash -n "$TMP" || { tui_msg "Update $APP_NAME" "File update rusak (sintaks), dibatalkan."; rm -f "$TMP"; return 1; }
   NV=$(grep '^APP_VERSION=' "$TMP" | cut -d'"' -f2)
   cp "$SELF" "$SELF.bak_$(date +%Y%m%d_%H%M%S)"
   cat "$TMP" > "$SELF" && chmod +x "$SELF" && rm -f "$TMP"
@@ -641,16 +638,19 @@ do_update() {
 # GUI dipakai bila whiptail ada + stdin/stdout terminal + tidak dipaksa teks (REXA_TEXT=1).
 tui_on() { command -v whiptail >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ] && [ -z "${REXA_TEXT:-}" ]; }
 tui_back() { echo "$APP_NAME $APP_VERSION | $(os_info) | mode: ${MODE:-docker}"; }
+# Buang sisa ketikan (mis. Enter dobel) biar dialog baru tidak ke-dismiss instan.
+tui_drain() { local _d; while read -t 0.2 -rs -n 1 _d; do :; done; }
 tui_ask() { # $1=judul $2=prompt $3=default -> stdout nilai (batal=keep default)
-  if tui_on; then whiptail --backtitle "$(tui_back)" --title "$1" --inputbox "$2" 10 65 "$3" 3>&1 1>&2 2>&3 || echo "$3";
+  if tui_on; then tui_drain; whiptail --backtitle "$(tui_back)" --title "$1" --inputbox "$2" 10 65 "$3" 3>&1 1>&2 2>&3 || echo "$3";
   else printf "%s [%s]: " "$2" "$3" >&2; read -r v || v=""; echo "${v:-$3}"; fi
 }
 tui_pass() { # $1=judul $2=prompt -> stdout password (batal="")
-  if tui_on; then whiptail --backtitle "$(tui_back)" --title "$1" --passwordbox "$2" 10 65 3>&1 1>&2 2>&3 || echo "";
+  if tui_on; then tui_drain; whiptail --backtitle "$(tui_back)" --title "$1" --passwordbox "$2" 10 65 3>&1 1>&2 2>&3 || echo "";
   else printf "%s: " "$2" >&2; read -rs v || v=""; echo >&2; echo "$v"; fi
 }
 tui_pick() { # $1=judul $2=prompt $3=default $4..=opsi -> stdout pilihan
   if tui_on; then
+    tui_drain
     local t="$1" p="$2" d="$3"; shift 3
     local args=()
     for o in "$@"; do if [ "$o" = "$d" ]; then args+=("$o" "" ON); else args+=("$o" "" OFF); fi; done
@@ -659,13 +659,33 @@ tui_pick() { # $1=judul $2=prompt $3=default $4..=opsi -> stdout pilihan
     printf "%s (opsi: %s) [%s]: " "$2" "$*" "$3" >&2; read -r v || v=""; echo "${v:-$3}"
   fi
 }
+tui_box() { # $1=judul ; stdin -> textbox GUI (scroll) / cat teks
+  if tui_on; then
+    local f
+    f=$(mktemp /tmp/rexa-box.XXXXXX)
+    cat > "$f"
+    if [ -s "$f" ]; then
+      tui_drain
+      whiptail --backtitle "$(tui_back)" --title "$1" --scrolltext --textbox "$f" 22 78
+    fi
+    rm -f "$f"
+  else cat; fi
+}
+tui_msg() { # $1=judul $2=teks -> msgbox GUI / echo
+  if tui_on; then tui_drain; whiptail --backtitle "$(tui_back)" --title "$1" --msgbox "$2" 14 65;
+  else echo "$2"; fi
+}
+tui_yesno() { # $1=judul $2=teks -> return 0 bila Ya
+  if tui_on; then tui_drain; whiptail --backtitle "$(tui_back)" --title "$1" --yesno "$2" 10 60 3>&1 1>&2 2>&3;
+  else printf "%s (y/n): " "$2" >&2; read -r c || return 1; [ "$c" = "y" ]; fi
+}
 
 menu() {
   while true; do
     read_config
     if tui_on; then
       c=$(whiptail --backtitle "$(tui_back)" --title "Menu utama" --cancel-button "Keluar" \
-        --menu "Pilih aksi:" 22 72 11 \
+        --menu "Pilih aksi (panah + Enter, Tab = pindah tombol):" 22 72 11 \
         "1" "Cek & install deps (apk/apt)" \
         "2" "Edit config (mode + koneksi + db)" \
         "3" "Tes koneksi CEPAT (wajib sebelum backup)" \
@@ -700,15 +720,15 @@ menu() {
     printf "Pilih [1-11]: "; read -r c || exit 0
     fi
     case "$c" in
-      1) check_dependencies ;;
+      1) check_dependencies 2>&1 | tui_box "Cek dependensi" ;;
       2) edit_config_simple ;;
-      3) test_all ;;
-      4) run_backup ;;
-      5) do_backup_pg; cleanup_old ;;
-      6) do_backup_mysql; cleanup_old ;;
-      7) cron_on ;;
-      8) cron_off; echo "--- cron:"; crontab -l 2>/dev/null | grep "$CRON_TAG" || echo "(off)"; echo "--- log tail:"; tail -n 20 "$LOG_FILE" 2>/dev/null || echo "(belum ada log)" ;;
-      9) check_update ;;
+      3) test_all 2>&1 | tui_box "Tes koneksi" ;;
+      4) run_backup 2>&1 | tui_box "Backup sekarang" ;;
+      5) { do_backup_pg; cleanup_old; } 2>&1 | tui_box "Backup PG" ;;
+      6) { do_backup_mysql; cleanup_old; } 2>&1 | tui_box "Backup MySQL" ;;
+      7) cron_on 2>&1 | tui_box "Cron ON" ;;
+      8) { cron_off; echo "--- cron:"; crontab -l 2>/dev/null | grep "$CRON_TAG" || echo "(off)"; echo "--- log tail:"; tail -n 20 "$LOG_FILE" 2>/dev/null || echo "(belum ada log)"; } 2>&1 | tui_box "Cron + Log" ;;
+      9) check_update 2>&1 | tui_box "Cek update" ;;
       10) do_update ;;
       11) exit 0 ;;
       *) echo "?" ;;
