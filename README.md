@@ -24,6 +24,8 @@ sudo rexa-db-backup
 
 Di TUI: menu `1` (install deps) → `2` (isi mode + kredensial + pilih DB **kecil** biar cepat) → `3` (tes koneksi sampai hijau) → `4` (backup) → `7` (cron ON).
 
+Saat dibuka tanpa argumen, pilih tampilan dulu: `GUI` (grafis di terminal), `CLI` (teks), atau `WEB` (segera hadir). Bisa dikunci via env: `REXA_UI=cli rexa-db-backup`.
+
 Non-interaktif:
 
 ```bash

@@ -681,7 +681,29 @@ tui_yesno() { # $1=judul $2=teks -> return 0 bila Ya
   else printf "%s (y/n): " "$2" >&2; read -r c || return 1; [ "$c" = "y" ]; fi
 }
 
+# ------------------------------------------------- Pilih tampilan saat dibuka
+pick_ui() {
+  [ -n "${REXA_UI:-}" ] && return 0
+  # Non-interaktif (cron/pipe) atau tanpa whiptail: langsung CLI teks.
+  if ! command -v whiptail >/dev/null 2>&1 || ! [ -t 0 ]; then REXA_UI=cli; return 0; fi
+  local c
+  c=$(whiptail --backtitle "$APP_NAME $APP_VERSION" --title "Pilih tampilan" \
+    --radiolist "Jalankan $APP_NAME via:" 14 60 3 \
+    "GUI" "Grafis di terminal (panah + Enter)" ON \
+    "CLI" "Teks biasa" OFF \
+    "WEB" "Browser (segera hadir)" OFF 3>&1 1>&2 2>&3) || { REXA_UI=gui; return 0; }
+  case "$c" in
+    WEB) whiptail --backtitle "$APP_NAME $APP_VERSION" --title "WEB" \
+           --msgbox "Versi WEB segera hadir.\nUntuk sekarang pakai GUI atau CLI dulu." 10 55
+         pick_ui ;;
+    CLI) REXA_UI=cli ;;
+    *)   REXA_UI=gui ;;
+  esac
+}
+
 menu() {
+  pick_ui
+  [ "${REXA_UI:-gui}" = "cli" ] && export REXA_TEXT=1
   while true; do
     read_config
     if tui_on; then
