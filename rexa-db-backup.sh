@@ -8,7 +8,7 @@
 set -u
 
 APP_NAME="Rexa-DB-Backup"
-APP_VERSION="0.1.10"
+APP_VERSION="0.1.11"
 APP_FOOTER="Copyright Risky Setiawan"
 REPO="sinnersman/rexa-db-backup"
 
