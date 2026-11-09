@@ -31,6 +31,8 @@ rexa-db-backup test          # tes TCP + auth
 rexa-db-backup backup-pg     # backup PG saja
 rexa-db-backup backup-mysql  # backup MySQL saja
 rexa-db-backup run-backup    # backup semua (dipakai cron)
+rexa-db-backup check-update  # cek versi repo vs lokal
+rexa-db-backup update        # update ke rilis terbaru (backup lama .bak)
 ```
 
 Config di `/etc/db-autobackup/config.json` (chmod 600), hasil di `/var/backups/db-backup`, log `/var/log/db-autobackup.log`.

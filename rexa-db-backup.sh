@@ -8,7 +8,9 @@
 set -u
 
 APP_NAME="Rexa-DB-Backup"
+APP_VERSION="0.1.1"
 APP_FOOTER="Copyright Risky Setiawan"
+REPO="sinnersman/rexa-db-backup"
 
 CONFIG_FILE="/etc/db-autobackup/config.json"
 LOG_FILE="/var/log/db-autobackup.log"
@@ -518,6 +520,46 @@ PYEOF
   echo "[+] Tersimpan."
 }
 
+# ------------------------------------------------- Update dari repo GitHub
+remote_ver() {
+  local url="https://raw.githubusercontent.com/$REPO/main/VERSION"
+  local v=""
+  if command -v curl >/dev/null 2>&1; then v=$(curl -fsSL --max-time 10 "$url" 2>/dev/null);
+  elif command -v wget >/dev/null 2>&1; then v=$(wget -qO- --timeout=10 "$url" 2>/dev/null); fi
+  echo "$v" | tr -d '[:space:]'
+}
+check_update() {
+  echo "--- Cek update $APP_NAME ---"
+  echo "[*] Versi lokal : $APP_VERSION"
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    echo "[-] butuh curl/wget dulu (apk add curl / apt install curl)"; return 1
+  fi
+  RV=$(remote_ver)
+  [ -z "$RV" ] && { echo "[-] gagal hubungi repo, cek koneksi internet."; return 1; }
+  echo "[*] Versi repo  : $RV"
+  if [ "$RV" = "$APP_VERSION" ]; then echo "[+] Sudah versi terbaru.";
+  else echo "[!] Update tersedia: $APP_VERSION -> $RV (pilih menu Update)"; fi
+}
+do_update() {
+  echo "--- Update $APP_NAME ---"
+  RV=$(remote_ver)
+  [ -z "$RV" ] && { echo "[-] gagal hubungi repo."; return 1; }
+  if [ "$RV" = "$APP_VERSION" ]; then echo "[+] Sudah terbaru ($APP_VERSION)."; return 0; fi
+  echo "[!] Akan update: $APP_VERSION -> $RV"
+  printf "Lanjut? (y/n): "; read -r c; [ "$c" = "y" ] || return 0
+  SELF="$(realpath "$0")"
+  TMP="$(mktemp /tmp/rexa-update.XXXXXX)"
+  URL="https://github.com/$REPO/releases/latest/download/rexa-db-backup.sh"
+  if command -v curl >/dev/null 2>&1; then curl -fsSL --max-time 60 "$URL" -o "$TMP";
+  else wget -q --timeout=60 -O "$TMP" "$URL"; fi
+  [ -s "$TMP" ] || { echo "[-] download gagal."; rm -f "$TMP"; return 1; }
+  bash -n "$TMP" || { echo "[-] file update rusak (sintaks), dibatalkan."; rm -f "$TMP"; return 1; }
+  NV=$(grep '^APP_VERSION=' "$TMP" | cut -d'"' -f2)
+  cp "$SELF" "$SELF.bak_$(date +%Y%m%d_%H%M%S)"
+  cat "$TMP" > "$SELF" && chmod +x "$SELF" && rm -f "$TMP"
+  echo "[+] Update OK → $NV (backup lama: $SELF.bak_*). Jalankan ulang script."
+}
+
 menu() {
   while true; do
     read_config
@@ -534,11 +576,13 @@ menu() {
     echo "6) Backup MySQL saja"
     echo "7) Cron ON"
     echo "8) Cron OFF + lihat log"
-    echo "9) Keluar"
+    echo "9) Cek update dari repo (lokal $APP_VERSION)"
+    echo "10) Update script ke versi terbaru"
+    echo "11) Keluar"
     echo "----------------------------------------------------------------"
     echo "  $APP_FOOTER"
     echo "================================================================"
-    printf "Pilih [1-9]: "; read -r c
+    printf "Pilih [1-11]: "; read -r c
     case "$c" in
       1) check_dependencies ;;
       2) edit_config_simple ;;
@@ -548,7 +592,9 @@ menu() {
       6) do_backup_mysql; cleanup_old ;;
       7) cron_on ;;
       8) cron_off; echo "--- cron:"; crontab -l 2>/dev/null | grep "$CRON_TAG" || echo "(off)"; echo "--- log tail:"; tail -n 20 "$LOG_FILE" 2>/dev/null || echo "(belum ada log)" ;;
-      9) exit 0 ;;
+      9) check_update ;;
+      10) do_update ;;
+      11) exit 0 ;;
       *) echo "?" ;;
     esac
   done
@@ -559,5 +605,8 @@ case "${1:-}" in
   test) test_all ;;
   backup-pg) do_backup_pg; cleanup_old ;;
   backup-mysql) do_backup_mysql; cleanup_old ;;
+  check-update) check_update ;;
+  update) do_update ;;
+  version) echo "$APP_NAME $APP_VERSION" ;;
   *) menu ;;
 esac

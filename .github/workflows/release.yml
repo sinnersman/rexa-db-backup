@@ -28,6 +28,8 @@ jobs:
           PATCH=$(echo "$CUR" | cut -d. -f3)
           NEXT="$MAJOR.$MINOR.$((PATCH + 1))"
           echo "$NEXT" > VERSION
+          sed -i "s/^APP_VERSION=\".*\"/APP_VERSION=\"$NEXT\"/" rexa-db-backup.sh
+          bash -n rexa-db-backup.sh
           echo "version=$NEXT" >> "$GITHUB_OUTPUT"
           echo "Rilis v$NEXT (dari $CUR)"
 
@@ -35,7 +37,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add VERSION
+          git add VERSION rexa-db-backup.sh
           git commit -m "chore: release v${{ steps.ver.outputs.version }} [skip ci]"
           git push
 
