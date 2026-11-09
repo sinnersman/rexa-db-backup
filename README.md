@@ -39,6 +39,15 @@ rexa-db-backup update        # update ke rilis terbaru (backup lama .bak)
 
 Config di `/etc/db-autobackup/config.json` (chmod 600), hasil di `/var/backups/db-backup`, log `/var/log/db-autobackup.log`.
 
+## Versi stabil
+
+Disarankan pakai rilis bertanda **STABIL** (saat ini **v0.1.9**, tag `stable`) untuk server produksi. Rilis terbaru bisa berisi fitur yang belum teruji penuh.
+
+```bash
+curl -fsSL https://github.com/sinnersman/rexa-db-backup/releases/download/v0.1.9/rexa-db-backup.sh -o /usr/local/bin/rexa-db-backup
+chmod +x /usr/local/bin/rexa-db-backup
+```
+
 ## Rilis otomatis
 
 Setiap push ke `main` menaikkan patch di `VERSION`, membuat tag `vX.Y.Z`, dan menerbitkan GitHub Release berisi `rexa-db-backup.sh` (lihat `.github/workflows/release.yml`).
